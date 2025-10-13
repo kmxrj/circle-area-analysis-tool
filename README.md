@@ -24,7 +24,7 @@ A local-only web application for analyzing slime mold growth areas in petri dish
 1. **Download the application**:
    ```bash
    # Clone or download the project files
-   git clone <repository-url>
+   git clone https://github.com/kmxrj/circle-area-analysis-tool.git
    cd "Slime App/web"
    ```
 
