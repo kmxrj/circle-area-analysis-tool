@@ -25,7 +25,7 @@ A local-only web application for analyzing slime mold growth areas in petri dish
    ```bash
    # Clone or download the project files
    git clone https://github.com/kmxrj/circle-area-analysis-tool.git
-   cd circle-area-analysis-tool/web
+   cd circle-area-analysis-tool
    ```
 
 2. **No build process required**: This is a standalone HTML file with CDN dependencies
@@ -34,8 +34,8 @@ A local-only web application for analyzing slime mold growth areas in petri dish
 
 ### Option 1: Direct File Opening (Recommended)
 ```bash
-# Navigate to the web directory
-cd circle-area-analysis-tool/web
+# Navigate to the project directory
+cd circle-area-analysis-tool
 
 # Open the HTML file directly in your browser
 open index.html
@@ -43,8 +43,8 @@ open index.html
 
 ### Option 2: Local HTTP Server
 ```bash
-# Navigate to the web directory
-cd circle-area-analysis-tool/web
+# Navigate to the project directory
+cd circle-area-analysis-tool
 
 # Start a local server (Python 3)
 python3 -m http.server 8080
