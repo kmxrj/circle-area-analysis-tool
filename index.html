@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slime Mold Area Analyzer</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/konva@9/konva.min.js"></script>
+    <script src="https://unpkg.com/react-konva@18/react-konva.umd.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        #root {
+            height: 100vh;
+            width: 100vw;
+        }
+        .grid-cell {
+            cursor: pointer;
+            transition: background-color 0.1s;
+            background-color: transparent;
+        }
+        .grid-cell:hover {
+            background-color: rgba(59, 130, 246, 0.2);
+        }
+        .grid-cell.selected {
+            background-color: rgba(239, 68, 68, 0.3);
+        }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Geometry utilities
+        function isPointInCircle(x, y, centerX, centerY, radius) {
+            const dx = x - centerX;
+            const dy = y - centerY;
+            return dx * dx + dy * dy <= radius * radius;
+        }
+
+        function getCellKey(x, y) {
+            return `${x},${y}`;
+        }
+
+        function calculateMetrics(gridState) {
+            const { diameter, cellSize, selectedCells } = gridState;
+            const radius = diameter / 2;
+            const totalCircleArea = Math.PI * radius * radius;
+            const selectedArea = selectedCells.size * (cellSize * cellSize);
+            const percentOfFullCircle = (selectedArea / totalCircleArea) * 100;
+            const percentOfHalfCircle = (selectedArea / (totalCircleArea / 2)) * 100;
+
+            return {
+                selectedArea,
+                totalCircleArea,
+                percentOfFullCircle,
+                percentOfHalfCircle,
+            };
+        }
+
+        function getGridDimensions(gridState) {
+            const { diameter, cellSize } = gridState;
+            const cols = Math.ceil(diameter / cellSize);
+            const rows = Math.ceil(diameter / cellSize);
+            return { cols, rows };
+        }
+
+        // Canvas Area Component
+        function CanvasArea({ gridState, setGridState, imageFile, imageScale, imageOffset }) {
+            const { diameter, cellSize, selectedCells } = gridState;
+            const { cols, rows } = getGridDimensions(gridState);
+            
+            // Auto-scaling: Calculate visual size based on available space
+            const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
+            const visualDiameter = Math.min(canvasSize.width * 0.8, canvasSize.height * 0.8);
+            const mmToPxRatio = visualDiameter / diameter;
+            
+            const radius = diameter / 2;
+            const centerX = diameter / 2;
+            const centerY = diameter / 2;
+
+            // Zoom state
+            const [zoom, setZoom] = useState(1);
+            const [panX, setPanX] = useState(0);
+            const [panY, setPanY] = useState(0);
+            const [isDragging, setIsDragging] = useState(false);
+            const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+
+            // Zoom controls
+            const handleZoomIn = () => {
+                setZoom(prev => Math.min(prev * 1.2, 5));
+            };
+
+            const handleZoomOut = () => {
+                setZoom(prev => Math.max(prev / 1.2, 0.1));
+            };
+
+            const handleResetZoom = () => {
+                setZoom(1);
+                setPanX(0);
+                setPanY(0);
+            };
+
+            // Mouse wheel zoom
+            const handleWheel = (e) => {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                setZoom(prev => Math.max(0.1, Math.min(5, prev * delta)));
+            };
+
+            // Pan controls
+            const handleMouseDown = (e) => {
+                setIsDragging(true);
+                setDragStart({ x: e.clientX - panX, y: e.clientY - panY });
+            };
+
+            const handleMouseMove = (e) => {
+                if (isDragging) {
+                    setPanX(e.clientX - dragStart.x);
+                    setPanY(e.clientY - dragStart.y);
+                }
+            };
+
+            const handleMouseUp = () => {
+                setIsDragging(false);
+            };
+
+            // Image state
+            const [imageUrl, setImageUrl] = useState(null);
+
+            // Resize observer to update canvas size
+            useEffect(() => {
+                const updateCanvasSize = () => {
+                    const canvasElement = document.querySelector('.canvas-container');
+                    if (canvasElement) {
+                        setCanvasSize({
+                            width: canvasElement.clientWidth,
+                            height: canvasElement.clientHeight
+                        });
+                    }
+                };
+
+                updateCanvasSize();
+                window.addEventListener('resize', updateCanvasSize);
+                return () => window.removeEventListener('resize', updateCanvasSize);
+            }, []);
+
+            // Handle image upload
+            useEffect(() => {
+                if (imageFile) {
+                    const url = URL.createObjectURL(imageFile);
+                    setImageUrl(url);
+                    
+                    return () => URL.revokeObjectURL(url);
+                }
+            }, [imageFile]);
+
+            const handleCellClick = (cellX, cellY) => {
+                const cellCenterX = cellX * cellSize + cellSize / 2;
+                const cellCenterY = cellY * cellSize + cellSize / 2;
+                
+                // Only allow selection inside the circle
+                if (!isPointInCircle(cellCenterX, cellCenterY, centerX, centerY, radius)) {
+                    return;
+                }
+
+                const cellKey = getCellKey(cellX, cellY);
+                const newSelectedCells = new Set(selectedCells);
+                
+                if (newSelectedCells.has(cellKey)) {
+                    newSelectedCells.delete(cellKey);
+                } else {
+                    newSelectedCells.add(cellKey);
+                }
+
+                setGridState({
+                    ...gridState,
+                    selectedCells: newSelectedCells,
+                });
+            };
+
+            // Create grid cells with zoom and pan
+            const gridCells = [];
+            for (let row = 0; row < rows; row++) {
+                for (let col = 0; col < cols; col++) {
+                    const cellKey = getCellKey(col, row);
+                    const cellCenterX = col * cellSize + cellSize / 2;
+                    const cellCenterY = row * cellSize + cellSize / 2;
+                    const isInsideCircle = isPointInCircle(cellCenterX, cellCenterY, centerX, centerY, radius);
+                    const isSelected = selectedCells.has(cellKey);
+                    
+                    if (!isInsideCircle) continue;
+
+                    gridCells.push(
+                        React.createElement('div', {
+                            key: cellKey,
+                            className: `grid-cell ${isSelected ? 'selected' : ''}`,
+                            style: {
+                                position: 'absolute',
+                                left: `calc(50% + ${(col * cellSize - centerX + panX) * zoom * mmToPxRatio}px)`,
+                                top: `calc(50% + ${(row * cellSize - centerY + panY) * zoom * mmToPxRatio}px)`,
+                                width: cellSize * zoom * mmToPxRatio,
+                                height: cellSize * zoom * mmToPxRatio,
+                                border: `${Math.max(0.5, 1 * zoom)}px solid #000000`,
+                                backgroundColor: isSelected ? 'rgba(239, 68, 68, 0.4)' : 'transparent',
+                                zIndex: 3
+                            },
+                            onClick: () => handleCellClick(col, row)
+                        })
+                    );
+                }
+            }
+
+            return React.createElement('div', {
+                className: 'canvas-container border border-gray-300 rounded-lg overflow-hidden shadow-lg relative',
+                style: {
+                    width: '100%',
+                    height: '100%',
+                    minHeight: '600px',
+                    cursor: isDragging ? 'grabbing' : 'grab'
+                },
+                onWheel: handleWheel,
+                onMouseDown: handleMouseDown,
+                onMouseMove: handleMouseMove,
+                onMouseUp: handleMouseUp,
+                onMouseLeave: handleMouseUp
+            }, [
+                // Image layer (behind everything)
+                imageUrl && React.createElement('img', {
+                    key: 'background-image',
+                    src: imageUrl,
+                    alt: 'Background image',
+                    style: {
+                        position: 'absolute',
+                        left: `calc(50% + ${(imageOffset.x + panX) * zoom * mmToPxRatio}px - ${(visualDiameter * zoom * imageScale) / 2}px)`,
+                        top: `calc(50% + ${(imageOffset.y + panY) * zoom * mmToPxRatio}px - ${(visualDiameter * zoom * imageScale) / 2}px)`,
+                        width: visualDiameter * zoom * imageScale,
+                        height: visualDiameter * zoom * imageScale,
+                        borderRadius: '50%',
+                        objectFit: 'cover',
+                        pointerEvents: 'none',
+                        zIndex: 0
+                    }
+                }),
+
+                // Zoom controls
+                React.createElement('div', {
+                    key: 'zoom-controls',
+                    style: {
+                        position: 'absolute',
+                        top: '10px',
+                        right: '10px',
+                        zIndex: 10,
+                        display: 'flex',
+                        gap: '5px'
+                    }
+                }, [
+                    React.createElement('button', {
+                        key: 'zoom-out',
+                        onClick: handleZoomOut,
+                        className: 'px-2 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50',
+                        style: { fontSize: '12px' }
+                    }, '-'),
+                    React.createElement('span', {
+                        key: 'zoom-level',
+                        className: 'px-2 py-1 bg-white border border-gray-300 rounded text-sm',
+                        style: { fontSize: '12px' }
+                    }, `${Math.round(zoom * 100)}%`),
+                    React.createElement('button', {
+                        key: 'zoom-in',
+                        onClick: handleZoomIn,
+                        className: 'px-2 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50',
+                        style: { fontSize: '12px' }
+                    }, '+'),
+                    React.createElement('button', {
+                        key: 'reset-zoom',
+                        onClick: handleResetZoom,
+                        className: 'px-2 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50',
+                        style: { fontSize: '12px' }
+                    }, 'Reset')
+                ]),
+
+                // Circle boundary with zoom - centered in canvas
+                React.createElement('div', {
+                    key: 'circle',
+                    style: {
+                        position: 'absolute',
+                        left: `calc(50% + ${panX * zoom * mmToPxRatio}px - ${(visualDiameter * zoom) / 2}px)`,
+                        top: `calc(50% + ${panY * zoom * mmToPxRatio}px - ${(visualDiameter * zoom) / 2}px)`,
+                        width: visualDiameter * zoom,
+                        height: visualDiameter * zoom,
+                        border: `${Math.max(1, 2 * zoom)}px solid #374151`,
+                        borderRadius: '50%',
+                        pointerEvents: 'none',
+                        zIndex: 2
+                    }
+                }),
+                
+                // Grid cells
+                ...gridCells
+            ]);
+        }
+
+        // Sidebar Panel Component
+        function SidebarPanel({ gridState, setGridState, imageFile, setImageFile, imageScale, setImageScale, imageOffset, setImageOffset, moveImage }) {
+            const metrics = calculateMetrics(gridState);
+            const { diameter, cellSize, selectedCells } = gridState;
+
+            const handleDiameterChange = (newDiameter) => {
+                if (newDiameter > 0) {
+                    setGridState({
+                        ...gridState,
+                        diameter: newDiameter,
+                        selectedCells: new Set(), // Clear selections when diameter changes
+                    });
+                }
+            };
+
+            const handleCellSizeChange = (newCellSize) => {
+                setGridState({
+                    ...gridState,
+                    cellSize: newCellSize,
+                    selectedCells: new Set(), // Clear selections when cell size changes
+                });
+            };
+
+            const handleImageUpload = (event) => {
+                const file = event.target.files?.[0];
+                if (file && (file.type === 'image/png' || file.type === 'image/jpeg')) {
+                    setImageFile(file);
+                }
+            };
+
+            const resetSelections = () => {
+                setGridState({
+                    ...gridState,
+                    selectedCells: new Set(),
+                });
+            };
+
+            return React.createElement('div', {
+                className: 'p-6 space-y-6'
+            }, [
+                React.createElement('h1', {
+                    key: 'title',
+                    className: 'text-2xl font-bold text-gray-900'
+                }, 'Slime Mold Analyzer'),
+                
+                // Controls
+                React.createElement('div', {
+                    key: 'controls',
+                    className: 'space-y-4'
+                }, [
+                    React.createElement('div', { key: 'diameter' }, [
+                        React.createElement('label', {
+                            key: 'diameter-label',
+                            className: 'block text-sm font-medium text-gray-700 mb-2'
+                        }, 'Circle Diameter (mm)'),
+                        React.createElement('input', {
+                            key: 'diameter-input',
+                            type: 'number',
+                            value: diameter,
+                            onChange: (e) => handleDiameterChange(Number(e.target.value)),
+                            className: 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500',
+                            min: '1',
+                            max: '500'
+                        })
+                    ]),
+
+                    React.createElement('div', { key: 'cellSize' }, [
+                        React.createElement('label', {
+                            key: 'cellSize-label',
+                            className: 'block text-sm font-medium text-gray-700 mb-2'
+                        }, 'Grid Size (mm)'),
+                        React.createElement('select', {
+                            key: 'cellSize-select',
+                            value: cellSize,
+                            onChange: (e) => handleCellSizeChange(Number(e.target.value)),
+                            className: 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+                        }, [
+                            React.createElement('option', { key: '0.5', value: 0.5 }, '0.5mm'),
+                            React.createElement('option', { key: '1', value: 1 }, '1mm'),
+                            React.createElement('option', { key: '1.5', value: 1.5 }, '1.5mm'),
+                            React.createElement('option', { key: '2', value: 2 }, '2mm')
+                        ])
+                    ]),
+
+                    React.createElement('div', { key: 'image' }, [
+                        React.createElement('label', {
+                            key: 'image-label',
+                            className: 'block text-sm font-medium text-gray-700 mb-2'
+                        }, 'Upload Image'),
+                        React.createElement('input', {
+                            key: 'image-input',
+                            type: 'file',
+                            accept: 'image/png,image/jpeg',
+                            onChange: handleImageUpload,
+                            className: 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+                        }),
+                        imageFile && React.createElement('div', {
+                            key: 'image-controls',
+                            className: 'mt-3 space-y-2'
+                        }, [
+                            React.createElement('p', {
+                                key: 'image-info',
+                                className: 'text-sm text-gray-600'
+                            }, `Uploaded: ${imageFile.name}`),
+                            React.createElement('div', { key: 'image-scale' }, [
+                                React.createElement('label', {
+                                    key: 'scale-label',
+                                    className: 'block text-xs text-gray-600 mb-1'
+                                }, 'Image Scale'),
+                                React.createElement('input', {
+                                    key: 'scale-input',
+                                    type: 'range',
+                                    min: '0.1',
+                                    max: '3',
+                                    step: '0.1',
+                                    value: imageScale,
+                                    onChange: (e) => setImageScale(Number(e.target.value)),
+                                    className: 'w-full'
+                                }),
+                                React.createElement('span', {
+                                    key: 'scale-value',
+                                    className: 'text-xs text-gray-500'
+                                }, `${Math.round(imageScale * 100)}%`)
+                            ]),
+                            React.createElement('button', {
+                                key: 'fit-image',
+                                onClick: () => {
+                                    setImageScale(1);
+                                    setImageOffset({ x: 0, y: 0 });
+                                },
+                                className: 'w-full px-2 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700'
+                            }, 'Fit to Circle'),
+                            
+                            // Image movement controls
+                            React.createElement('div', {
+                                key: 'image-movement',
+                                className: 'space-y-2'
+                            }, [
+                                React.createElement('div', {
+                                    key: 'movement-label',
+                                    className: 'text-xs text-gray-600 text-center'
+                                }, 'Move Image'),
+                                React.createElement('div', {
+                                    key: 'arrow-controls',
+                                    className: 'grid grid-cols-3 gap-1 max-w-24 mx-auto'
+                                }, [
+                                    // Empty top-left
+                                    React.createElement('div', { key: 'empty-1' }),
+                                    
+                                    // Up arrow
+                                    React.createElement('button', {
+                                        key: 'up',
+                                        onClick: () => moveImage('up'),
+                                        className: 'p-1 bg-gray-200 hover:bg-gray-300 rounded text-xs',
+                                        style: { fontSize: '12px' }
+                                    }, '↑'),
+                                    
+                                    // Empty top-right
+                                    React.createElement('div', { key: 'empty-2' }),
+                                    
+                                    // Left arrow
+                                    React.createElement('button', {
+                                        key: 'left',
+                                        onClick: () => moveImage('left'),
+                                        className: 'p-1 bg-gray-200 hover:bg-gray-300 rounded text-xs',
+                                        style: { fontSize: '12px' }
+                                    }, '←'),
+                                    
+                                    // Center (empty)
+                                    React.createElement('div', { key: 'center' }),
+                                    
+                                    // Right arrow
+                                    React.createElement('button', {
+                                        key: 'right',
+                                        onClick: () => moveImage('right'),
+                                        className: 'p-1 bg-gray-200 hover:bg-gray-300 rounded text-xs',
+                                        style: { fontSize: '12px' }
+                                    }, '→'),
+                                    
+                                    // Empty bottom-left
+                                    React.createElement('div', { key: 'empty-3' }),
+                                    
+                                    // Down arrow
+                                    React.createElement('button', {
+                                        key: 'down',
+                                        onClick: () => moveImage('down'),
+                                        className: 'p-1 bg-gray-200 hover:bg-gray-300 rounded text-xs',
+                                        style: { fontSize: '12px' }
+                                    }, '↓'),
+                                    
+                                    // Empty bottom-right
+                                    React.createElement('div', { key: 'empty-4' })
+                                ])
+                            ])
+                        ])
+                    ]),
+
+                    React.createElement('button', {
+                        key: 'reset',
+                        onClick: resetSelections,
+                        className: 'w-full px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500'
+                    }, 'Reset Selections')
+                ]),
+
+                // Metrics
+                React.createElement('div', {
+                    key: 'metrics',
+                    className: 'space-y-3'
+                }, [
+                    React.createElement('h2', {
+                        key: 'metrics-title',
+                        className: 'text-lg font-semibold text-gray-900'
+                    }, 'Metrics'),
+                    
+                    React.createElement('div', {
+                        key: 'metrics-content',
+                        className: 'bg-gray-50 p-4 rounded-lg space-y-2'
+                    }, [
+                        React.createElement('div', {
+                            key: 'selected-area',
+                            className: 'flex justify-between'
+                        }, [
+                            React.createElement('span', {
+                                key: 'selected-area-label',
+                                className: 'text-sm text-gray-600'
+                            }, 'Selected Area:'),
+                            React.createElement('span', {
+                                key: 'selected-area-value',
+                                className: 'text-sm font-medium'
+                            }, `${metrics.selectedArea.toFixed(2)} mm²`)
+                        ]),
+                        
+                        React.createElement('div', {
+                            key: 'total-area',
+                            className: 'flex justify-between'
+                        }, [
+                            React.createElement('span', {
+                                key: 'total-area-label',
+                                className: 'text-sm text-gray-600'
+                            }, 'Total Circle Area:'),
+                            React.createElement('span', {
+                                key: 'total-area-value',
+                                className: 'text-sm font-medium'
+                            }, `${metrics.totalCircleArea.toFixed(2)} mm²`)
+                        ]),
+                        
+                        React.createElement('div', {
+                            key: 'percent-full',
+                            className: 'flex justify-between'
+                        }, [
+                            React.createElement('span', {
+                                key: 'percent-full-label',
+                                className: 'text-sm text-gray-600'
+                            }, 'Percent of Full Circle:'),
+                            React.createElement('span', {
+                                key: 'percent-full-value',
+                                className: 'text-sm font-medium'
+                            }, `${metrics.percentOfFullCircle.toFixed(1)}%`)
+                        ]),
+                        
+                        React.createElement('div', {
+                            key: 'percent-half',
+                            className: 'flex justify-between'
+                        }, [
+                            React.createElement('span', {
+                                key: 'percent-half-label',
+                                className: 'text-sm text-gray-600'
+                            }, 'Percent of Half Circle:'),
+                            React.createElement('span', {
+                                key: 'percent-half-value',
+                                className: 'text-sm font-medium'
+                            }, `${metrics.percentOfHalfCircle.toFixed(1)}%`)
+                        ])
+                    ])
+                ]),
+
+                // Instructions
+                React.createElement('div', {
+                    key: 'instructions',
+                    className: 'text-sm text-gray-600 space-y-2'
+                }, [
+                    React.createElement('p', { key: 'instructions-title' }, [
+                        React.createElement('strong', { key: 'strong' }, 'Instructions:')
+                    ]),
+                    React.createElement('ul', {
+                        key: 'instructions-list',
+                        className: 'list-disc list-inside space-y-1'
+                    }, [
+                        React.createElement('li', { key: 'inst1' }, 'Click grid squares to select/deselect areas'),
+                        React.createElement('li', { key: 'inst2' }, 'Only squares inside the circle are selectable'),
+                        React.createElement('li', { key: 'inst3' }, 'Use mouse wheel to zoom in/out'),
+                        React.createElement('li', { key: 'inst4' }, 'Click and drag to pan around'),
+                        React.createElement('li', { key: 'inst5' }, 'Use zoom controls (+/-/Reset) in top-right'),
+                        React.createElement('li', { key: 'inst6' }, 'Adjust diameter and grid size as needed'),
+                        React.createElement('li', { key: 'inst7' }, 'Upload an image to align with your petri dish'),
+                        React.createElement('li', { key: 'inst8' }, 'Use image scale slider to resize uploaded image'),
+                        React.createElement('li', { key: 'inst9' }, 'Use arrow buttons to move image independently'),
+                        React.createElement('li', { key: 'inst10' }, 'Click "Fit to Circle" to center and resize image')
+                    ])
+                ])
+            ]);
+        }
+
+        // Main App Component
+        function App() {
+            const [gridState, setGridState] = useState({
+                diameter: 100, // mm
+                cellSize: 1, // mm
+                selectedCells: new Set(),
+            });
+
+            const [imageFile, setImageFile] = useState(null);
+            const [imageScale, setImageScale] = useState(1);
+            const [imageOffset, setImageOffset] = useState({ x: 0, y: 0 });
+
+            // Image movement controls
+            const moveImage = (direction) => {
+                const step = 2.5; // pixels to move per click (1/4 of original 10px)
+                switch (direction) {
+                    case 'up':
+                        setImageOffset(prev => ({ ...prev, y: prev.y - step }));
+                        break;
+                    case 'down':
+                        setImageOffset(prev => ({ ...prev, y: prev.y + step }));
+                        break;
+                    case 'left':
+                        setImageOffset(prev => ({ ...prev, x: prev.x - step }));
+                        break;
+                    case 'right':
+                        setImageOffset(prev => ({ ...prev, x: prev.x + step }));
+                        break;
+                }
+            };
+
+            return React.createElement('div', {
+                className: 'flex h-screen bg-gray-100'
+            }, [
+                React.createElement('div', {
+                    key: 'canvas-area',
+                    className: 'flex-1 p-4'
+                }, React.createElement(CanvasArea, {
+                    gridState: gridState,
+                    setGridState: setGridState,
+                    imageFile: imageFile,
+                    imageScale: imageScale,
+                    imageOffset: imageOffset
+                })),
+                React.createElement('div', {
+                    key: 'sidebar',
+                    className: 'w-80 bg-white border-l border-gray-200'
+                }, React.createElement(SidebarPanel, {
+                    gridState: gridState,
+                    setGridState: setGridState,
+                    imageFile: imageFile,
+                    setImageFile: setImageFile,
+                    imageScale: imageScale,
+                    setImageScale: setImageScale,
+                    imageOffset: imageOffset,
+                    setImageOffset: setImageOffset,
+                    moveImage: moveImage
+                }))
+            ]);
+        }
+
+        // Render the app
+        ReactDOM.render(React.createElement(App), document.getElementById('root'));
+    </script>
+  </body>
+</html>
