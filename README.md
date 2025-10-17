@@ -55,7 +55,7 @@ python3 -m http.server 8080
 ## How to Use
 
 ### 1. Set Up Your Analysis Parameters
-- **Circle Diameter**: Enter the diameter of your petri dish in millimeters (default: 100mm)
+- **Circle Diameter**: Enter the diameter of your petri dish in millimeters (default: 85mm)
 - **Grid Size**: Choose grid resolution (0.5mm, 1mm, 1.5mm, or 2mm)
 
 ### 2. Upload Your Image
@@ -63,8 +63,8 @@ python3 -m http.server 8080
 - The image will appear behind the circular grid
 
 ### 3. Align Your Image
-- **Scale**: Use the slider to resize the image to match your petri dish size
-- **Position**: Use the arrow buttons (↑ ↓ ← →) to move the image for precise alignment
+- **Scale**: Use the slider to resize the image to match your petri dish size (5% increments)
+- **Position**: Use the arrow buttons (↑ ↓ ← →) to move the image for precise alignment (1.25px per click)
 - **Fit to Circle**: Click this button to automatically center and resize the image
 
 ### 4. Select Regions
@@ -81,7 +81,7 @@ The sidebar displays real-time metrics:
 - **Percent of Half Circle**: Percentage relative to half the circle area
 
 ### 6. Navigation Controls
-- **Zoom**: Use mouse wheel or zoom buttons (+/-/Reset) in the top-right corner
+- **Zoom**: Use mouse wheel or zoom buttons (+/-/Reset) in the top-right corner (5% increments)
 - **Pan**: Click and drag to move around the image
 - **Reset**: Use "Reset Selections" to clear all selected areas
 

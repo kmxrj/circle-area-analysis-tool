@@ -53,6 +53,70 @@
             return `${x},${y}`;
         }
 
+        function parseCellKey(key) {
+            const [x, y] = key.split(',').map(Number);
+            return { x, y };
+        }
+
+        function floodFill(gridState, startX, startY) {
+            const { diameter, cellSize, selectedCells } = gridState;
+            const radius = diameter / 2;
+            const centerX = diameter / 2;
+            const centerY = diameter / 2;
+            const { cols, rows } = getGridDimensions(gridState);
+            
+            // Check if starting cell is inside circle
+            const startCellCenterX = startX * cellSize + cellSize / 2;
+            const startCellCenterY = startY * cellSize + cellSize / 2;
+            if (!isPointInCircle(startCellCenterX, startCellCenterY, centerX, centerY, radius)) {
+                return new Set();
+            }
+            
+            const visited = new Set();
+            const toFill = new Set();
+            const stack = [{ x: startX, y: startY }];
+            
+            while (stack.length > 0) {
+                const { x, y } = stack.pop();
+                const cellKey = getCellKey(x, y);
+                
+                if (visited.has(cellKey)) continue;
+                visited.add(cellKey);
+                
+                // Check if cell is inside circle
+                const cellCenterX = x * cellSize + cellSize / 2;
+                const cellCenterY = y * cellSize + cellSize / 2;
+                if (!isPointInCircle(cellCenterX, cellCenterY, centerX, centerY, radius)) {
+                    continue;
+                }
+                
+                // Check if cell is already selected (boundary)
+                if (selectedCells.has(cellKey)) {
+                    continue;
+                }
+                
+                toFill.add(cellKey);
+                
+                // Add neighbors to stack
+                const neighbors = [
+                    { x: x - 1, y }, { x: x + 1, y },
+                    { x, y: y - 1 }, { x, y: y + 1 }
+                ];
+                
+                for (const neighbor of neighbors) {
+                    if (neighbor.x >= 0 && neighbor.x < cols && 
+                        neighbor.y >= 0 && neighbor.y < rows) {
+                        const neighborKey = getCellKey(neighbor.x, neighbor.y);
+                        if (!visited.has(neighborKey)) {
+                            stack.push(neighbor);
+                        }
+                    }
+                }
+            }
+            
+            return toFill;
+        }
+
         function calculateMetrics(gridState) {
             const { diameter, cellSize, selectedCells } = gridState;
             const radius = diameter / 2;
@@ -77,7 +141,7 @@
         }
 
         // Canvas Area Component
-        function CanvasArea({ gridState, setGridState, imageFile, imageScale, imageOffset }) {
+        function CanvasArea({ gridState, setGridState, imageFile, imageScale, imageOffset, fillMode, setFillMode }) {
             const { diameter, cellSize, selectedCells } = gridState;
             const { cols, rows } = getGridDimensions(gridState);
             
@@ -99,11 +163,11 @@
 
             // Zoom controls
             const handleZoomIn = () => {
-                setZoom(prev => Math.min(prev * 1.2, 5));
+                setZoom(prev => Math.min(prev * 1.05, 5));
             };
 
             const handleZoomOut = () => {
-                setZoom(prev => Math.max(prev / 1.2, 0.1));
+                setZoom(prev => Math.max(prev / 1.05, 0.1));
             };
 
             const handleResetZoom = () => {
@@ -115,7 +179,7 @@
             // Mouse wheel zoom
             const handleWheel = (e) => {
                 e.preventDefault();
-                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                const delta = e.deltaY > 0 ? 0.95 : 1.05;
                 setZoom(prev => Math.max(0.1, Math.min(5, prev * delta)));
             };
 
@@ -175,19 +239,36 @@
                     return;
                 }
 
-                const cellKey = getCellKey(cellX, cellY);
-                const newSelectedCells = new Set(selectedCells);
-                
-                if (newSelectedCells.has(cellKey)) {
-                    newSelectedCells.delete(cellKey);
+                if (fillMode) {
+                    // Fill mode: use flood fill algorithm
+                    const cellsToFill = floodFill(gridState, cellX, cellY);
+                    const newSelectedCells = new Set(selectedCells);
+                    
+                    // Add all filled cells to selection
+                    for (const cellKey of cellsToFill) {
+                        newSelectedCells.add(cellKey);
+                    }
+                    
+                    setGridState({
+                        ...gridState,
+                        selectedCells: newSelectedCells,
+                    });
                 } else {
-                    newSelectedCells.add(cellKey);
-                }
+                    // Normal mode: toggle individual cell
+                    const cellKey = getCellKey(cellX, cellY);
+                    const newSelectedCells = new Set(selectedCells);
+                    
+                    if (newSelectedCells.has(cellKey)) {
+                        newSelectedCells.delete(cellKey);
+                    } else {
+                        newSelectedCells.add(cellKey);
+                    }
 
-                setGridState({
-                    ...gridState,
-                    selectedCells: newSelectedCells,
-                });
+                    setGridState({
+                        ...gridState,
+                        selectedCells: newSelectedCells,
+                    });
+                }
             };
 
             // Create grid cells with zoom and pan
@@ -313,7 +394,7 @@
         }
 
         // Sidebar Panel Component
-        function SidebarPanel({ gridState, setGridState, imageFile, setImageFile, imageScale, setImageScale, imageOffset, setImageOffset, moveImage }) {
+        function SidebarPanel({ gridState, setGridState, imageFile, setImageFile, imageScale, setImageScale, imageOffset, setImageOffset, moveImage, fillMode, setFillMode }) {
             const metrics = calculateMetrics(gridState);
             const { diameter, cellSize, selectedCells } = gridState;
 
@@ -426,7 +507,7 @@
                                     type: 'range',
                                     min: '0.1',
                                     max: '3',
-                                    step: '0.1',
+                                    step: '0.05',
                                     value: imageScale,
                                     onChange: (e) => setImageScale(Number(e.target.value)),
                                     className: 'w-full'
@@ -507,6 +588,34 @@
                                 ])
                             ])
                         ])
+                    ]),
+
+                    React.createElement('div', {
+                        key: 'tool-controls',
+                        className: 'space-y-2'
+                    }, [
+                        React.createElement('div', {
+                            key: 'fill-mode-toggle',
+                            className: 'flex items-center space-x-2'
+                        }, [
+                            React.createElement('input', {
+                                key: 'fill-checkbox',
+                                type: 'checkbox',
+                                id: 'fill-mode',
+                                checked: fillMode,
+                                onChange: (e) => setFillMode(e.target.checked),
+                                className: 'rounded border-gray-300 text-blue-600 focus:ring-blue-500'
+                            }),
+                            React.createElement('label', {
+                                key: 'fill-label',
+                                htmlFor: 'fill-mode',
+                                className: 'text-sm font-medium text-gray-700'
+                            }, 'Fill Tool')
+                        ]),
+                        React.createElement('p', {
+                            key: 'fill-description',
+                            className: 'text-xs text-gray-500'
+                        }, fillMode ? 'Click to fill connected areas' : 'Click to select individual cells')
                     ]),
 
                     React.createElement('button', {
@@ -600,16 +709,17 @@
                         key: 'instructions-list',
                         className: 'list-disc list-inside space-y-1'
                     }, [
-                        React.createElement('li', { key: 'inst1' }, 'Click grid squares to select/deselect areas'),
+                        React.createElement('li', { key: 'inst1' }, 'Click grid squares to select/deselect areas (or use Fill Tool)'),
                         React.createElement('li', { key: 'inst2' }, 'Only squares inside the circle are selectable'),
-                        React.createElement('li', { key: 'inst3' }, 'Use mouse wheel to zoom in/out'),
+                        React.createElement('li', { key: 'inst3' }, 'Use mouse wheel to zoom in/out (5% increments)'),
                         React.createElement('li', { key: 'inst4' }, 'Click and drag to pan around'),
                         React.createElement('li', { key: 'inst5' }, 'Use zoom controls (+/-/Reset) in top-right'),
                         React.createElement('li', { key: 'inst6' }, 'Adjust diameter and grid size as needed'),
                         React.createElement('li', { key: 'inst7' }, 'Upload an image to align with your petri dish'),
-                        React.createElement('li', { key: 'inst8' }, 'Use image scale slider to resize uploaded image'),
-                        React.createElement('li', { key: 'inst9' }, 'Use arrow buttons to move image independently'),
-                        React.createElement('li', { key: 'inst10' }, 'Click "Fit to Circle" to center and resize image')
+                        React.createElement('li', { key: 'inst8' }, 'Use image scale slider to resize uploaded image (5% increments)'),
+                        React.createElement('li', { key: 'inst9' }, 'Use arrow buttons to move image independently (1.25px per click)'),
+                        React.createElement('li', { key: 'inst10' }, 'Click "Fit to Circle" to center and resize image'),
+                        React.createElement('li', { key: 'inst11' }, 'Enable "Fill Tool" to automatically fill connected areas')
                     ])
                 ])
             ]);
@@ -618,7 +728,7 @@
         // Main App Component
         function App() {
             const [gridState, setGridState] = useState({
-                diameter: 100, // mm
+                diameter: 85, // mm
                 cellSize: 1, // mm
                 selectedCells: new Set(),
             });
@@ -626,10 +736,11 @@
             const [imageFile, setImageFile] = useState(null);
             const [imageScale, setImageScale] = useState(1);
             const [imageOffset, setImageOffset] = useState({ x: 0, y: 0 });
+            const [fillMode, setFillMode] = useState(false);
 
             // Image movement controls
             const moveImage = (direction) => {
-                const step = 2.5; // pixels to move per click (1/4 of original 10px)
+                const step = 1.25; // pixels to move per click (1/8 of original 10px)
                 switch (direction) {
                     case 'up':
                         setImageOffset(prev => ({ ...prev, y: prev.y - step }));
@@ -657,7 +768,9 @@
                     setGridState: setGridState,
                     imageFile: imageFile,
                     imageScale: imageScale,
-                    imageOffset: imageOffset
+                    imageOffset: imageOffset,
+                    fillMode: fillMode,
+                    setFillMode: setFillMode
                 })),
                 React.createElement('div', {
                     key: 'sidebar',
@@ -671,7 +784,9 @@
                     setImageScale: setImageScale,
                     imageOffset: imageOffset,
                     setImageOffset: setImageOffset,
-                    moveImage: moveImage
+                    moveImage: moveImage,
+                    fillMode: fillMode,
+                    setFillMode: setFillMode
                 }))
             ]);
         }
